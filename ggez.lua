@@ -1,7 +1,10 @@
-
 local Players = game:GetService("Players")
-local player = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
 
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+-- UI เดิม
 local gui = Instance.new("ScreenGui")
 gui.Name = "ASTDMacroUI"
 gui.ResetOnSpawn = false
@@ -49,18 +52,103 @@ local function makeButton(text, callback)
     button.Activated:Connect(callback)
 end
 
+-- ระบบ Record
 local recording = false
 local actions = {}
+local startedAt = 0
+local inputConnection
+local MAX_ACTIONS = 5000
+
+local function addAction(action)
+    if not recording then
+        return
+    end
+
+    if #actions >= MAX_ACTIONS then
+        recording = false
+        status.Text = "Limit reached | Stopped"
+        return
+    end
+
+    action.t = os.clock() - startedAt
+    table.insert(actions, action)
+
+    status.Text = "Recording | Actions: " .. #actions
+end
+
+local function startRecording()
+    if recording then
+        return
+    end
+
+    actions = {}
+    startedAt = os.clock()
+    recording = true
+
+    status.Text = "Recording | Actions: 0"
+end
+
+local function stopRecording()
+    recording = false
+    status.Text = "Stopped | Actions: " .. #actions
+end
+
+-- เริ่มบันทึกเมื่อกดเมาส์ซ้ายในพื้นที่เกม
+-- ไม่บันทึกอินพุตที่ Roblox ระบุว่าถูก UI ใช้งานแล้ว
+local function onInputBegan(input, gameProcessed)
+    if not recording or gameProcessed then
+        return
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local screen = UserInputService:GetMouseLocation()
+
+        local action = {
+            type = "click",
+            screen = {
+                x = screen.X,
+                y = screen.Y
+            }
+        }
+
+        -- พิกัดโลก: ใช้ตำแหน่งจุดที่เมาส์ชี้
+        -- เฉพาะเมื่อได้ตำแหน่งที่เข้าถึงได้จริง
+        local ok, hitPosition = pcall(function()
+            return mouse.Hit.Position
+        end)
+
+        if ok and typeof(hitPosition) == "Vector3" then
+            action.world = {
+                x = hitPosition.X,
+                y = hitPosition.Y,
+                z = hitPosition.Z
+            }
+        end
+
+        addAction(action)
+
+    elseif input.UserInputType == Enum.UserInputType.Keyboard then
+        local keyName = input.KeyCode.Name
+
+        -- บันทึกเฉพาะปุ่มตัวเลข 1–6
+        if keyName:match("^[1-6]$") then
+            addAction({
+                type = "key",
+                key = keyName
+            })
+        end
+    end
+end
+
+inputConnection =
+    UserInputService.InputBegan:Connect(onInputBegan)
 
 makeButton("Record", function()
-    actions = {}
-    recording = true
-    status.Text = "Status: Recording"
+    startRecording()
 end)
 
 makeButton("Stop", function()
-    recording = false
-    status.Text = "Status: Stopped"
+    stopRecording()
 end)
 
 makeButton("Replay", function()
@@ -69,10 +157,39 @@ makeButton("Replay", function()
         return
     end
 
-    status.Text = "Actions: " .. #actions
-    print("Replay prototype: no game actions executed")
+    status.Text = "Recorded: " .. #actions
+        .. " | Replay not connected"
 end)
 
 makeButton("Save / Load", function()
     status.Text = "Storage not connected"
 end)
+
+-- ดูข้อมูลที่บันทึกไว้ใน Output
+-- ใช้สำหรับตรวจสอบข้อมูลเท่านั้น
+_G.ASTDGetRecordedActions = function()
+    local snapshot = {}
+
+    for i, action in ipairs(actions) do
+        snapshot[i] = action
+    end
+
+    return snapshot
+end
+
+_G.ASTDPrintRecordedActions = function()
+    for i, action in ipairs(actions) do
+        print(i, action.type, action.t, action.key)
+        if action.screen then
+            print("Screen:", action.screen.x, action.screen.y)
+        end
+        if action.world then
+            print(
+                "World:",
+                action.world.x,
+                action.world.y,
+                action.world.z
+            )
+        end
+    end
+end
